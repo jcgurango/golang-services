@@ -14,6 +14,8 @@ require (
 	github.com/openzipkin-contrib/zipkin-go-opentracing v0.4.5
 	github.com/openzipkin/zipkin-go v0.4.0
 	github.com/prometheus/client_golang v1.12.2
+	github.com/uptrace/bun v1.1.6
+	github.com/uptrace/bun/extra/bundebug v1.1.6
 	jcgurango.com/ledger/dbmodel v0.0.0-00010101000000-000000000000
 	sourcegraph.com/sourcegraph/appdash v0.0.0-20211028080628-e2786a622600
 )
@@ -44,9 +46,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.4 // indirect
 	github.com/tklauser/numcpus v0.2.1 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
-	github.com/uptrace/bun v1.1.6 // indirect
 	github.com/uptrace/bun/dialect/pgdialect v1.1.6 // indirect
-	github.com/uptrace/bun/extra/bundebug v1.1.6 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/crypto v0.0.0-20211117183948-ae814b36b871 // indirect
