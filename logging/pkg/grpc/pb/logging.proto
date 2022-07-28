@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "logging/pkg/grpc/pb";
+
+
+//The Logging service definition.
+service Logging {
+ rpc Log (LogRequest) returns (LogReply);
+}
+message LogRequest {
+  string service = 1;
+  int64 timestamp = 2;
+  string message = 3;
+}
+message LogReply {
+  bool logged = 1;
+}

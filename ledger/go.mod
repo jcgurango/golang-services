@@ -2,6 +2,8 @@ module ledger
 
 replace jcgurango.com/ledger/dbmodel => ../dbmodel
 
+replace logging => ../logging
+
 go 1.18
 
 require (
@@ -16,7 +18,9 @@ require (
 	github.com/prometheus/client_golang v1.12.2
 	github.com/uptrace/bun v1.1.6
 	github.com/uptrace/bun/extra/bundebug v1.1.6
+	google.golang.org/grpc v1.48.0
 	jcgurango.com/ledger/dbmodel v0.0.0-00010101000000-000000000000
+	logging v0.0.0-00010101000000-000000000000
 	sourcegraph.com/sourcegraph/appdash v0.0.0-20211028080628-e2786a622600
 )
 
@@ -54,6 +58,5 @@ require (
 	golang.org/x/sys v0.0.0-20220708085239-5a0f0661e09d // indirect
 	golang.org/x/text v0.3.7 // indirect
 	google.golang.org/genproto v0.0.0-20210917145530-b395a37504d4 // indirect
-	google.golang.org/grpc v1.41.0 // indirect
-	google.golang.org/protobuf v1.27.1 // indirect
+	google.golang.org/protobuf v1.28.1 // indirect
 )

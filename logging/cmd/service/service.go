@@ -4,30 +4,24 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	endpoint "ledger/pkg/endpoint"
-	http1 "ledger/pkg/http"
-	service "ledger/pkg/service"
-	logging "logging/pkg/grpc/pb"
+	endpoint "logging/pkg/endpoint"
+	grpc "logging/pkg/grpc"
+	pb "logging/pkg/grpc/pb"
+	service "logging/pkg/service"
 	"net"
-	http2 "net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	endpoint1 "github.com/go-kit/kit/endpoint"
 	log "github.com/go-kit/kit/log"
-	httptransport "github.com/go-kit/kit/transport/http"
-	"github.com/golang-jwt/jwt"
 	lightsteptracergo "github.com/lightstep/lightstep-tracer-go"
 	group "github.com/oklog/oklog/pkg/group"
 	opentracinggo "github.com/opentracing/opentracing-go"
 	zipkingoopentracing "github.com/openzipkin-contrib/zipkin-go-opentracing"
 	zipkingo "github.com/openzipkin/zipkin-go"
 	http "github.com/openzipkin/zipkin-go/reporter/http"
-	promhttp "github.com/prometheus/client_golang/prometheus/promhttp"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	grpc1 "google.golang.org/grpc"
 	appdash "sourcegraph.com/sourcegraph/appdash"
 	opentracing "sourcegraph.com/sourcegraph/appdash/opentracing"
 )
@@ -37,7 +31,7 @@ var logger log.Logger
 
 // Define our flags. Your service probably won't need to bind listeners for
 // all* supported transports, but we do it here for demonstration purposes.
-var fs = flag.NewFlagSet("ledger", flag.ExitOnError)
+var fs = flag.NewFlagSet("logging", flag.ExitOnError)
 var debugAddr = fs.String("debug-addr", ":8080", "Debug and metrics listen address")
 var httpAddr = fs.String("http-addr", ":8081", "HTTP listen address")
 var grpcAddr = fs.String("grpc-addr", ":8082", "gRPC listen address")
@@ -63,7 +57,7 @@ func Run() {
 		logger.Log("tracer", "Zipkin", "URL", *zipkinURL)
 		reporter := http.NewReporter(*zipkinURL)
 		defer reporter.Close()
-		endpoint, err := zipkingo.NewEndpoint("ledger", "localhost:80")
+		endpoint, err := zipkingo.NewEndpoint("logging", "localhost:80")
 		if err != nil {
 			logger.Log("err", err)
 			os.Exit(1)
@@ -95,63 +89,24 @@ func Run() {
 	initMetricsEndpoint(g)
 	initCancelInterrupt(g)
 	logger.Log("exit", g.Run())
+
 }
+func initGRPCHandler(endpoints endpoint.Endpoints, g *group.Group) {
+	options := defaultGRPCOptions(logger, tracer)
+	// Add your GRPC options here
 
-func readAuthenticationHeader(ctx context.Context, r *http2.Request) context.Context {
-	var header string = r.Header.Get("Authorization")
-
-	if len(header) > 0 {
-		claims := jwt.MapClaims{}
-		_, err := jwt.ParseWithClaims(header, &claims, func(token *jwt.Token) (interface{}, error) {
-			return []byte(os.Getenv("JWT_SECRET")), nil
-		})
-
-		if err == nil {
-			userId, err := strconv.ParseInt(claims["user_id"].(string), 10, 64)
-
-			if err == nil {
-				return context.WithValue(ctx, "user-id", userId)
-			} else {
-				logger.Log(err)
-			}
-		} else {
-			logger.Log(err)
-		}
-	}
-
-	return context.WithValue(ctx, "user-id", int64(0))
-}
-
-func addLoggingClient(ctx context.Context, r *http2.Request) context.Context {
-	conn, err := grpc.Dial(os.Getenv("LOGGING_SERVICE_ADDRESS"), grpc.WithTransportCredentials(insecure.NewCredentials()))
-
+	grpcServer := grpc.NewGRPCServer(endpoints, options)
+	grpcListener, err := net.Listen("tcp", *grpcAddr)
 	if err != nil {
-		logger.Log(err)
-	} else {
-		logger := logging.NewLoggingClient(conn)
-		return context.WithValue(ctx, "logging-client", logger)
-	}
-
-	return ctx
-}
-
-func initHttpHandler(endpoints endpoint.Endpoints, g *group.Group) {
-	options := defaultHttpOptions(logger, tracer)
-
-	for key, element := range options {
-		options[key] = append(element, httptransport.ServerBefore(readAuthenticationHeader), httptransport.ServerBefore(addLoggingClient))
-	}
-
-	httpHandler := http1.NewHTTPHandler(endpoints, options)
-	httpListener, err := net.Listen("tcp", *httpAddr)
-	if err != nil {
-		logger.Log("transport", "HTTP", "during", "Listen", "err", err)
+		logger.Log("transport", "gRPC", "during", "Listen", "err", err)
 	}
 	g.Add(func() error {
-		logger.Log("transport", "HTTP", "addr", *httpAddr)
-		return http2.Serve(httpListener, httpHandler)
+		logger.Log("transport", "gRPC", "addr", *grpcAddr)
+		baseServer := grpc1.NewServer()
+		pb.RegisterLoggingServer(baseServer, grpcServer)
+		return baseServer.Serve(grpcListener)
 	}, func(error) {
-		httpListener.Close()
+		grpcListener.Close()
 	})
 
 }
@@ -168,17 +123,19 @@ func getEndpointMiddleware(logger log.Logger) (mw map[string][]endpoint1.Middlew
 	return
 }
 func initMetricsEndpoint(g *group.Group) {
-	http2.DefaultServeMux.Handle("/metrics", promhttp.Handler())
-	debugListener, err := net.Listen("tcp", *debugAddr)
-	if err != nil {
-		logger.Log("transport", "debug/HTTP", "during", "Listen", "err", err)
-	}
-	g.Add(func() error {
-		logger.Log("transport", "debug/HTTP", "addr", *debugAddr)
-		return http2.Serve(debugListener, http2.DefaultServeMux)
-	}, func(error) {
-		debugListener.Close()
-	})
+	/*
+		http1.DefaultServeMux.Handle("/metrics", promhttp.Handler())
+		debugListener, err := net.Listen("tcp", *debugAddr)
+		if err != nil {
+			logger.Log("transport", "debug/HTTP", "during", "Listen", "err", err)
+		}
+		g.Add(func() error {
+			logger.Log("transport", "debug/HTTP", "addr", *debugAddr)
+			return http1.Serve(debugListener, http1.DefaultServeMux)
+		}, func(error) {
+			debugListener.Close()
+		})
+	*/
 }
 func initCancelInterrupt(g *group.Group) {
 	cancelInterrupt := make(chan struct{})
