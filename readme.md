@@ -23,6 +23,11 @@ This command will rollback migrations to set up the DB:
 env DB_DRIVER=postgres "DB_CONNECTION_STRING=postgresql://localhost/" JWT_SECRET=test123 go run ledger/cmd/migrate/main.go rollback
 ```
 
+### Running Tests
+```bash
+go test -v ledger/...
+```
+
 ## Logging Service
 The logging service doesn't require any environment variables, and accepts logs over gRPC from other services and logs them to stdout.
 

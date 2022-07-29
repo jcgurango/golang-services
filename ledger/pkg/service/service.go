@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"ledger/pkg/service/service_interface"
 	"ledger/pkg/service/types"
 	"logging/pkg/grpc/pb"
 	"os"
@@ -18,26 +17,73 @@ import (
 
 // LedgerService describes the service.
 type LedgerService interface {
+	// Register a new user account
 	Register(ctx context.Context, user string, pass string) (err error)
+
+	// Authenticate a user and return a token
 	Authenticate(ctx context.Context, user string, pass string) (token string, err error)
+
+	// Create a new account for the user identified by the context
 	NewAccount(ctx context.Context, name string) (err error)
+
+	// Get all accounts for the user identified by the context
 	GetAccounts(ctx context.Context) (accounts []dbmodel.Account, err error)
+
+	// Create a new transaction for the user identified by the context
 	NewTransaction(ctx context.Context, detail string, creditAccount string, debitAccount string, amount string) (err error)
 
+	// Get account balances for the user identified by the context
 	GetBalance(ctx context.Context) (balances *[]types.AccountBalance, err error)
+
+	// Get transactions for the user identified by the context
 	GetTransactions(ctx context.Context) (transactions *[]dbmodel.Transaction, err error)
 }
 
 type basicLedgerService struct{}
 
-func readLoggedInUser(ctx context.Context) int64 {
-	var loggedInUserId int64 = ctx.Value("user-id").(int64)
-	return loggedInUserId
+// Connection to a data source
+type LedgerServiceConnection interface {
+	// Check if a user with this username exists
+	UserExists(ctx context.Context, username string) (bool, error)
+
+	// Add a new user to the database
+	CreateUser(ctx context.Context, user *dbmodel.User) error
+
+	// Retrieve a user from the database
+	GetUser(ctx context.Context, username string) (dbmodel.User, error)
+
+	// Check if the user has an account with this name
+	AccountExists(ctx context.Context, userId int64, accountName string) (bool, error)
+
+	// Check if an account ID exists in the database
+	AccountIdExists(ctx context.Context, userId int64, accountId int64) (bool, error)
+
+	// Create a new account
+	CreateAccount(ctx context.Context, account *dbmodel.Account) error
+
+	// Create a new transaction
+	CreateTransaction(ctx context.Context, transaction *dbmodel.Transaction) error
+
+	// Retrieve the accounts for a user
+	GetUserAccounts(ctx context.Context, userId int64) ([]dbmodel.Account, error)
+
+	// Retrieve the running balance for all accounts and transactions for a user
+	GetBalance(ctx context.Context, userId int64) ([]types.AccountBalance, error)
+
+	// Retrieve all transactions for a user
+	GetUserTransactions(ctx context.Context, userId int64) ([]dbmodel.Transaction, error)
+}
+
+func getLoggedInUser(ctx context.Context) int64 {
+	return ctx.Value("user-id").(int64)
 }
 
 func getLogger(ctx context.Context) pb.LoggingClient {
-	var logger pb.LoggingClient = ctx.Value("logging-client").(pb.LoggingClient)
-	return logger
+	return ctx.Value("logging-client").(pb.LoggingClient)
+}
+
+func getServiceConnection(ctx context.Context) LedgerServiceConnection {
+	return ctx.Value("service-connection").(LedgerServiceConnection)
 }
 
 func log(ctx context.Context, message string) {
@@ -50,6 +96,7 @@ func log(ctx context.Context, message string) {
 }
 
 func (b *basicLedgerService) Register(ctx context.Context, user string, pass string) (err error) {
+	conn := getServiceConnection(ctx)
 	log(ctx, fmt.Sprintf("Register called with parameters [%s] [redacted]", user))
 
 	if user == "" || pass == "" {
@@ -57,7 +104,7 @@ func (b *basicLedgerService) Register(ctx context.Context, user string, pass str
 	}
 
 	// First check if a user with that username exists in the database
-	exists, err := service_interface.UserExists(ctx, user)
+	exists, err := conn.UserExists(ctx, user)
 
 	if err != nil {
 		log(ctx, "Error encoutered in UserExists: "+err.Error())
@@ -81,7 +128,7 @@ func (b *basicLedgerService) Register(ctx context.Context, user string, pass str
 		Password: hashedPassword,
 	}
 
-	err = service_interface.CreateUser(ctx, databaseUser)
+	err = conn.CreateUser(ctx, databaseUser)
 
 	if err != nil {
 		log(ctx, "Error encoutered in CreateUser: "+err.Error())
@@ -92,10 +139,11 @@ func (b *basicLedgerService) Register(ctx context.Context, user string, pass str
 }
 
 func (b *basicLedgerService) Authenticate(ctx context.Context, user string, pass string) (token string, err error) {
+	conn := getServiceConnection(ctx)
 	log(ctx, fmt.Sprintf("Authenticate called with parameters [%s] [redacted]", user))
 
 	// First check if a user with that username exists in the database
-	exists, err := service_interface.UserExists(ctx, user)
+	exists, err := conn.UserExists(ctx, user)
 
 	if err != nil {
 		log(ctx, "Error encoutered in UserExists: "+err.Error())
@@ -107,7 +155,7 @@ func (b *basicLedgerService) Authenticate(ctx context.Context, user string, pass
 	}
 
 	// Retrieve the user
-	dbUser, err := service_interface.GetUser(ctx, user)
+	dbUser, err := conn.GetUser(ctx, user)
 
 	if err != nil {
 		log(ctx, "Error encoutered in GetUser: "+err.Error())
@@ -146,9 +194,10 @@ func (b *basicLedgerService) Authenticate(ctx context.Context, user string, pass
 }
 
 func (b *basicLedgerService) NewAccount(ctx context.Context, name string) (err error) {
-	userId := readLoggedInUser(ctx)
+	conn := getServiceConnection(ctx)
+	userId := getLoggedInUser(ctx)
 	log(ctx, fmt.Sprintf("NewAccount called by [%s] with parameters [%s] [redacted]", strconv.FormatInt(userId, 10), name))
-	accountExists, err := service_interface.AccountExists(ctx, userId, name)
+	accountExists, err := conn.AccountExists(ctx, userId, name)
 
 	if err != nil {
 		log(ctx, "Error encoutered in AccountExists: "+err.Error())
@@ -164,7 +213,7 @@ func (b *basicLedgerService) NewAccount(ctx context.Context, name string) (err e
 		User: userId,
 	}
 
-	err = service_interface.CreateAccount(ctx, &newAccount)
+	err = conn.CreateAccount(ctx, &newAccount)
 
 	if err != nil {
 		log(ctx, "Error encoutered in CreateAccount: "+err.Error())
@@ -174,21 +223,9 @@ func (b *basicLedgerService) NewAccount(ctx context.Context, name string) (err e
 	return nil
 }
 
-func (b *basicLedgerService) GetAccounts(ctx context.Context) (accounts []dbmodel.Account, err error) {
-	userId := readLoggedInUser(ctx)
-	log(ctx, fmt.Sprintf("GetAccounts called by [%s]", strconv.FormatInt(userId, 10)))
-	accounts, err = service_interface.GetUserAccounts(ctx, userId)
-
-	if err != nil {
-		log(ctx, "Error encoutered in GetUserAccounts: "+err.Error())
-		return nil, errors.New("Internal error")
-	}
-
-	return accounts, nil
-}
-
 func (b *basicLedgerService) NewTransaction(ctx context.Context, detail string, creditAccount string, debitAccount string, amount string) (err error) {
-	userId := readLoggedInUser(ctx)
+	conn := getServiceConnection(ctx)
+	userId := getLoggedInUser(ctx)
 	log(ctx, fmt.Sprintf("NewAccount called by [%s] with parameters [%s] [%s] [%s] [%s]", strconv.FormatInt(userId, 10), detail, creditAccount, debitAccount, amount))
 	creditAccountInt64, err := strconv.ParseInt(creditAccount, 10, 64)
 
@@ -197,7 +234,7 @@ func (b *basicLedgerService) NewTransaction(ctx context.Context, detail string, 
 		return errors.New("Internal error")
 	}
 
-	creditAccountExists, err := service_interface.AccountIdExists(ctx, userId, creditAccountInt64)
+	creditAccountExists, err := conn.AccountIdExists(ctx, userId, creditAccountInt64)
 
 	if err != nil {
 		log(ctx, "Error encoutered in AccountIdExists: "+err.Error())
@@ -211,7 +248,7 @@ func (b *basicLedgerService) NewTransaction(ctx context.Context, detail string, 
 		return errors.New("Internal error")
 	}
 
-	debitAccountExists, err := service_interface.AccountIdExists(ctx, userId, debitAccountInt64)
+	debitAccountExists, err := conn.AccountIdExists(ctx, userId, debitAccountInt64)
 
 	if err != nil {
 		log(ctx, "Error encoutered in AccountIdExists: "+err.Error())
@@ -222,7 +259,7 @@ func (b *basicLedgerService) NewTransaction(ctx context.Context, detail string, 
 		return errors.New("Credit or debit account does not exist")
 	}
 
-	err = service_interface.CreateTransaction(ctx, &dbmodel.Transaction{
+	err = conn.CreateTransaction(ctx, &dbmodel.Transaction{
 		CreditAccount: creditAccountInt64,
 		DebitAccount:  debitAccountInt64,
 		Detail:        detail,
@@ -237,10 +274,25 @@ func (b *basicLedgerService) NewTransaction(ctx context.Context, detail string, 
 	return err
 }
 
+func (b *basicLedgerService) GetAccounts(ctx context.Context) (accounts []dbmodel.Account, err error) {
+	conn := getServiceConnection(ctx)
+	userId := getLoggedInUser(ctx)
+	log(ctx, fmt.Sprintf("GetAccounts called by [%s]", strconv.FormatInt(userId, 10)))
+	accounts, err = conn.GetUserAccounts(ctx, userId)
+
+	if err != nil {
+		log(ctx, "Error encoutered in GetUserAccounts: "+err.Error())
+		return nil, errors.New("Internal error")
+	}
+
+	return accounts, nil
+}
+
 func (b *basicLedgerService) GetBalance(ctx context.Context) (balances *[]types.AccountBalance, err error) {
-	userId := readLoggedInUser(ctx)
+	conn := getServiceConnection(ctx)
+	userId := getLoggedInUser(ctx)
 	log(ctx, fmt.Sprintf("GetBalance called by [%s]", strconv.FormatInt(userId, 10)))
-	accountBalances, err := service_interface.GetBalance(ctx, userId)
+	accountBalances, err := conn.GetBalance(ctx, userId)
 
 	if err != nil {
 		log(ctx, "Error encoutered in GetBalance: "+err.Error())
@@ -251,9 +303,10 @@ func (b *basicLedgerService) GetBalance(ctx context.Context) (balances *[]types.
 }
 
 func (b *basicLedgerService) GetTransactions(ctx context.Context) (transactions *[]dbmodel.Transaction, err error) {
-	userId := readLoggedInUser(ctx)
+	conn := getServiceConnection(ctx)
+	userId := getLoggedInUser(ctx)
 	log(ctx, fmt.Sprintf("GetTransactions called by [%s]", strconv.FormatInt(userId, 10)))
-	userTransactions, err := service_interface.GetUserTransactions(ctx, userId)
+	userTransactions, err := conn.GetUserTransactions(ctx, userId)
 
 	if err != nil {
 		log(ctx, "Error encoutered in GetUserTransactions: "+err.Error())

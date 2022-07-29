@@ -7,6 +7,7 @@ import (
 	endpoint "ledger/pkg/endpoint"
 	http1 "ledger/pkg/http"
 	service "ledger/pkg/service"
+	stubs "ledger/pkg/stubs"
 	logging "logging/pkg/grpc/pb"
 	"net"
 	http2 "net/http"
@@ -34,6 +35,7 @@ import (
 
 var tracer opentracinggo.Tracer
 var logger log.Logger
+var serviceConnection = service.LedgerServiceDatabaseConnection{}
 
 // Define our flags. Your service probably won't need to bind listeners for
 // all* supported transports, but we do it here for demonstration purposes.
@@ -112,10 +114,10 @@ func readAuthenticationHeader(ctx context.Context, r *http2.Request) context.Con
 			if err == nil {
 				return context.WithValue(ctx, "user-id", userId)
 			} else {
-				logger.Log(err)
+				logger.Log("transport", "HTTP", "during", "readAuthenticationHeader", "err", err)
 			}
 		} else {
-			logger.Log(err)
+			logger.Log("transport", "HTTP", "during", "readAuthenticationHeader", "err", err)
 		}
 	}
 
@@ -126,20 +128,26 @@ func addLoggingClient(ctx context.Context, r *http2.Request) context.Context {
 	conn, err := grpc.Dial(os.Getenv("LOGGING_SERVICE_ADDRESS"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	if err != nil {
-		logger.Log(err)
+		logger.Log("transport", "HTTP", "during", "addLoggingClient", "err", err)
 	} else {
 		logger := logging.NewLoggingClient(conn)
 		return context.WithValue(ctx, "logging-client", logger)
 	}
 
-	return ctx
+	// If we can't get in contact with the logging service, log locally instead
+	var stubLogger stubs.StubLoggingClient = stubs.StubLoggingClient{Logger: logger}
+	return context.WithValue(ctx, "logging-client", stubLogger)
+}
+
+func addServiceConnection(ctx context.Context, r *http2.Request) context.Context {
+	return context.WithValue(ctx, "service-connection", &serviceConnection)
 }
 
 func initHttpHandler(endpoints endpoint.Endpoints, g *group.Group) {
 	options := defaultHttpOptions(logger, tracer)
 
 	for key, element := range options {
-		options[key] = append(element, httptransport.ServerBefore(readAuthenticationHeader), httptransport.ServerBefore(addLoggingClient))
+		options[key] = append(element, httptransport.ServerBefore(readAuthenticationHeader), httptransport.ServerBefore(addLoggingClient), httptransport.ServerBefore(addServiceConnection))
 	}
 
 	httpHandler := http1.NewHTTPHandler(endpoints, options)
