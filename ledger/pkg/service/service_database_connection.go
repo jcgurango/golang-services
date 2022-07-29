@@ -127,9 +127,9 @@ func (l *LedgerServiceDatabaseConnection) GetUserTransactions(ctx context.Contex
 	var transactions []dbmodel.Transaction = []dbmodel.Transaction{}
 	err := db.NewSelect().
 		Model(&transactions).
-		Join(`INNER JOIN "accounts" AS ac ON "transactions".credit_account = "accounts".id`).
-		Join(`INNER JOIN "accounts" AS ad ON "transactions".debit_account = "accounts".id`).
-		Where(`"ac".user = ? OR "ad".user = ?`, userId).
+		Join(`INNER JOIN "accounts" AS ac ON "transaction".credit_account = "ac".id`).
+		Join(`INNER JOIN "accounts" AS ad ON "transaction".debit_account = "ad".id`).
+		Where(`"ac"."user" = ? OR "ad"."user" = ?`, userId, userId).
 		Scan(ctx, &transactions)
 
 	if err != nil {
