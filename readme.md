@@ -226,3 +226,6 @@ The logging service doesn't require any environment variables, and accepts logs 
 ```bash
 go run logging/cmd
 ```
+
+## Database Diagram
+![Database Diagram](https://i.imgur.com/b1SdnhI.png)
